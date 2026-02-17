@@ -108,31 +108,13 @@ CPEOF
 
 INSTALLED_SIZE=$(du -sk "${PKG_DIR}" | cut -f1)
 
-# Auto-detect dependencies from system libraries (exclude bundled ones)
-BUNDLED_DIR="${PKG_DIR}/usr/lib/zed/lib"
-SYSTEM_LIBS=$(LD_LIBRARY_PATH="${BUNDLED_DIR}" ldd "${PKG_DIR}/usr/lib/zed/libexec/zed-editor" 2>/dev/null \
-  | grep "=> /" \
-  | grep -v "${BUNDLED_DIR}" \
-  | awk '{print $3}' || true)
-
-AUTO_DEPS=""
-for lib in $SYSTEM_LIBS; do
-  pkg=$(dpkg -S "$lib" 2>/dev/null | cut -d: -f1 | head -1 || true)
-  if [ -n "$pkg" ]; then
-    AUTO_DEPS="${AUTO_DEPS}${AUTO_DEPS:+, }${pkg}"
-  fi
-done
-AUTO_DEPS=$(echo "$AUTO_DEPS" | tr ',' '\n' | sed 's/^ //' | sort -u | paste -sd ", ")
-
-echo "Auto-detected dependencies: ${AUTO_DEPS}"
-
 cat > "${PKG_DIR}/DEBIAN/control" << CTLEOF
 Package: zed
 Version: ${DEB_VERSION}
 Architecture: amd64
 Maintainer: zed-deb repository <noreply@github.com>
 Installed-Size: ${INSTALLED_SIZE}
-Depends: ${AUTO_DEPS}, libvulkan1
+Depends: libc6, libstdc++6, libgcc-s1, libasound2, libvulkan1
 Recommends: libwayland-client0, pipewire-alsa | pulseaudio, xdg-desktop-portal
 Suggests: fonts-noto, gnome-keyring | kwalletmanager
 Section: editors
