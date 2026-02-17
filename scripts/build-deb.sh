@@ -127,8 +127,9 @@ Version: ${DEB_VERSION}
 Architecture: amd64
 Maintainer: zed-deb repository <noreply@github.com>
 Installed-Size: ${INSTALLED_SIZE}
-Depends: ${AUTO_DEPS}
-Recommends: fonts-noto, libvulkan1, libwayland-client0
+Depends: ${AUTO_DEPS}, libvulkan1
+Recommends: libwayland-client0, pipewire-alsa | pulseaudio, xdg-desktop-portal
+Suggests: fonts-noto, gnome-keyring | kwalletmanager
 Section: editors
 Priority: optional
 Homepage: https://zed.dev
