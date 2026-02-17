@@ -86,6 +86,11 @@ Keywords=text;editor;code;
 DSKEOF
 fi
 
+# Licenses from upstream
+if [ -f "${ZED_DIR}/licenses.md" ]; then
+  cp "${ZED_DIR}/licenses.md" "${PKG_DIR}/usr/share/doc/zed/licenses.md"
+fi
+
 # Copyright
 cat > "${PKG_DIR}/usr/share/doc/zed/copyright" << CPEOF
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
