@@ -2,9 +2,10 @@
 set -euo pipefail
 
 # Build a .deb package from Zed's official Linux tarball
-# Usage: ./scripts/build-deb.sh [VERSION]
+# Usage: ./scripts/build-deb.sh [VERSION] [REVISION]
 
 VERSION="${1:-}"
+REVISION="${2:-1}"
 
 if [ -z "$VERSION" ]; then
   echo "Fetching latest Zed release version..."
@@ -13,13 +14,13 @@ fi
 
 VERSION="${VERSION#v}"
 
-echo "Building zed ${VERSION} for amd64..."
+echo "Building zed ${VERSION}-${REVISION} for amd64..."
 
 WORKDIR=$(mktemp -d)
 trap "rm -rf ${WORKDIR}" EXIT
 
 TARBALL_URL="https://github.com/zed-industries/zed/releases/download/v${VERSION}/zed-linux-x86_64.tar.gz"
-DEB_VERSION="${VERSION}"
+DEB_VERSION="${VERSION}-${REVISION}"
 PKG_DIR="${WORKDIR}/zed_${DEB_VERSION}_amd64"
 
 echo "Downloading ${TARBALL_URL}..."

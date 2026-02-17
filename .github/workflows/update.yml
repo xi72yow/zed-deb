@@ -10,6 +10,7 @@ on:
         required: false
 
 permissions:
+  contents: write
   pages: write
   id-token: write
 
@@ -21,13 +22,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Restore cached version
-        id: cache
-        uses: actions/cache/restore@v4
         with:
-          path: .latest-version
-          key: zed-latest-version
+          fetch-tags: true
 
       - name: Determine version
         id: version
@@ -42,29 +38,35 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-          if [ -n "${INPUT_VERSION}" ]; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Manual trigger with version ${VERSION}, forcing rebuild."
-          elif [ -f ".latest-version" ]; then
-            CURRENT=$(cat .latest-version)
-            if [ "$CURRENT" = "$VERSION" ]; then
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              echo "Version ${VERSION} already packaged, skipping."
-            else
-              echo "skip=false" >> "$GITHUB_OUTPUT"
-              echo "New version: ${VERSION} (current: ${CURRENT})"
-            fi
+          # Find current revision for this version from tags
+          LATEST_TAG=$(git tag -l "v${VERSION}-*" --sort=-v:refname | head -1)
+          if [ -n "$LATEST_TAG" ]; then
+            CURRENT_REV=$(echo "$LATEST_TAG" | sed "s/v${VERSION}-//")
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "No previous version found, building ${VERSION}"
+            CURRENT_REV=0
           fi
+
+          if [ -n "${INPUT_VERSION}" ]; then
+            NEW_REV=$((CURRENT_REV + 1))
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Manual trigger with version ${VERSION}, revision ${NEW_REV}."
+          elif [ "$CURRENT_REV" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Version ${VERSION} already packaged (rev ${CURRENT_REV}), skipping."
+          else
+            NEW_REV=1
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "New version: ${VERSION}-${NEW_REV}"
+          fi
+
+          echo "revision=${NEW_REV:-}" >> "$GITHUB_OUTPUT"
 
       - name: Build .deb package
         if: steps.version.outputs.skip != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y dpkg-dev apt-utils
-          ./scripts/build-deb.sh "${{ steps.version.outputs.version }}"
+          ./scripts/build-deb.sh "${{ steps.version.outputs.version }}" "${{ steps.version.outputs.revision }}"
 
       - name: Import GPG key
         if: steps.version.outputs.skip != 'true'
@@ -105,16 +107,14 @@ jobs:
         run: |
           ./scripts/update-repo.sh
 
-      - name: Save version to cache
+      - name: Tag release
         if: steps.version.outputs.skip != 'true'
-        run: echo "${{ steps.version.outputs.version }}" > .latest-version
-
-      - name: Update cached version
-        if: steps.version.outputs.skip != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .latest-version
-          key: zed-latest-version-${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          TAG="v${{ steps.version.outputs.version }}-${{ steps.version.outputs.revision }}"
+          git tag "$TAG"
+          git push origin "$TAG"
 
       - name: Upload repo artifact
         if: steps.version.outputs.skip != 'true'
