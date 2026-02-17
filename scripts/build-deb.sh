@@ -108,14 +108,27 @@ CPEOF
 
 INSTALLED_SIZE=$(du -sk "${PKG_DIR}" | cut -f1)
 
+# Auto-detect dependencies from system libraries (exclude bundled ones)
+BUNDLED_DIR="${PKG_DIR}/usr/lib/zed/lib"
+AUTO_DEPS=$(ldd "${PKG_DIR}/usr/lib/zed/libexec/zed-editor" 2>/dev/null \
+  | grep "=> /" \
+  | grep -v "${BUNDLED_DIR}" \
+  | awk '{print $3}' \
+  | xargs -r dpkg -S 2>/dev/null \
+  | cut -d: -f1 \
+  | sort -u \
+  | paste -sd ", ")
+
+echo "Auto-detected dependencies: ${AUTO_DEPS}"
+
 cat > "${PKG_DIR}/DEBIAN/control" << CTLEOF
 Package: zed
 Version: ${DEB_VERSION}
 Architecture: amd64
 Maintainer: zed-deb repository <noreply@github.com>
 Installed-Size: ${INSTALLED_SIZE}
-Depends: libc6, libstdc++6, libxkbcommon0, libvulkan1, libwayland-client0
-Recommends: fonts-noto, libxkbcommon-x11-0
+Depends: ${AUTO_DEPS}
+Recommends: fonts-noto, libvulkan1, libwayland-client0
 Section: editors
 Priority: optional
 Homepage: https://zed.dev
