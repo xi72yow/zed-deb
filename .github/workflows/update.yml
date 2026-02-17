@@ -82,7 +82,7 @@ jobs:
 
           echo "=== Verifying required files ==="
           for path in ./usr/bin/zed ./usr/lib/zed/bin/zed ./usr/lib/zed/libexec/zed-editor ./usr/share/applications/zed.desktop; do
-            if ! dpkg-deb -c "$DEB" | grep -q "$path"; then
+            if ! dpkg-deb -c "$DEB" 2>/dev/null | grep -q "$path"; then
               echo "MISSING: $path"
               exit 1
             fi
