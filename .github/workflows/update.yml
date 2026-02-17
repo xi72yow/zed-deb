@@ -1,0 +1,110 @@
+name: Update Zed Package
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Zed version to package (e.g. 0.223.3). Leave empty for latest."
+        required: false
+
+permissions:
+  pages: write
+  id-token: write
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    outputs:
+      skipped: ${{ steps.version.outputs.skip }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore cached version
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .latest-version
+          key: zed-latest-version
+
+      - name: Determine version
+        id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "${INPUT_VERSION}" ]; then
+            VERSION="${INPUT_VERSION}"
+          else
+            VERSION=$(curl -sL "https://api.github.com/repos/zed-industries/zed/releases/latest" \
+              | jq -r ".tag_name" | sed "s/^v//")
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          if [ -n "${INPUT_VERSION}" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Manual trigger with version ${VERSION}, forcing rebuild."
+          elif [ -f ".latest-version" ]; then
+            CURRENT=$(cat .latest-version)
+            if [ "$CURRENT" = "$VERSION" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "Version ${VERSION} already packaged, skipping."
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              echo "New version: ${VERSION} (current: ${CURRENT})"
+            fi
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "No previous version found, building ${VERSION}"
+          fi
+
+      - name: Build .deb package
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils
+          ./scripts/build-deb.sh "${{ steps.version.outputs.version }}"
+
+      - name: Import GPG key
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          echo "${GPG_PRIVATE_KEY}" | gpg --batch --import
+
+      - name: Update APT repository
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          ./scripts/update-repo.sh
+
+      - name: Save version to cache
+        if: steps.version.outputs.skip != 'true'
+        run: echo "${{ steps.version.outputs.version }}" > .latest-version
+
+      - name: Update cached version
+        if: steps.version.outputs.skip != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .latest-version
+          key: zed-latest-version-${{ steps.version.outputs.version }}
+
+      - name: Upload repo artifact
+        if: steps.version.outputs.skip != 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: repo/
+
+  deploy-pages:
+    needs: check-and-build
+    if: needs.check-and-build.outputs.skipped != 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
