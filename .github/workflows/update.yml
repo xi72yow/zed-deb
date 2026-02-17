@@ -73,6 +73,31 @@ jobs:
         run: |
           echo "${GPG_PRIVATE_KEY}" | gpg --batch --import
 
+      - name: Test .deb package
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          DEB=$(ls packages/zed_*.deb)
+          echo "=== Package structure ==="
+          dpkg-deb -c "$DEB" | grep -E '(usr/bin/zed|usr/lib/zed/bin/zed|usr/lib/zed/libexec/zed-editor|usr/share/applications/zed.desktop)'
+
+          echo "=== Verifying required files ==="
+          for path in ./usr/bin/zed ./usr/lib/zed/bin/zed ./usr/lib/zed/libexec/zed-editor ./usr/share/applications/zed.desktop; do
+            if ! dpkg-deb -c "$DEB" | grep -q "$path"; then
+              echo "MISSING: $path"
+              exit 1
+            fi
+          done
+          echo "All required files present."
+
+          echo "=== Test install ==="
+          sudo dpkg -i "$DEB" || sudo apt-get install -f -y
+
+          echo "=== Test CLI ==="
+          zed --version
+
+          echo "=== Check library dependencies ==="
+          ldd /usr/lib/zed/libexec/zed-editor | grep "not found" && exit 1 || echo "All libraries resolved."
+
       - name: Update APT repository
         if: steps.version.outputs.skip != 'true'
         env:
