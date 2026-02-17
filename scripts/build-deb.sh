@@ -24,11 +24,11 @@ DEB_VERSION="${VERSION}-${REVISION}"
 PKG_DIR="${WORKDIR}/zed_${DEB_VERSION}_amd64"
 
 echo "Downloading ${TARBALL_URL}..."
-curl -sL "${TARBALL_URL}" -o "${WORKDIR}/zed.tar.gz"
+curl -fSL "${TARBALL_URL}" -o "${WORKDIR}/zed.tar.gz"
 mkdir -p "${WORKDIR}/extract"
 tar xzf "${WORKDIR}/zed.tar.gz" -C "${WORKDIR}/extract"
 
-ZED_DIR=$(find "${WORKDIR}/extract" -maxdepth 1 -type d -name "zed*" | head -1)
+ZED_DIR=$(find "${WORKDIR}/extract" -maxdepth 1 -type d -name "zed*" | head -1 || true)
 if [ -z "$ZED_DIR" ]; then
   ZED_DIR="${WORKDIR}/extract"
 fi
@@ -110,14 +110,19 @@ INSTALLED_SIZE=$(du -sk "${PKG_DIR}" | cut -f1)
 
 # Auto-detect dependencies from system libraries (exclude bundled ones)
 BUNDLED_DIR="${PKG_DIR}/usr/lib/zed/lib"
-AUTO_DEPS=$(ldd "${PKG_DIR}/usr/lib/zed/libexec/zed-editor" 2>/dev/null \
+SYSTEM_LIBS=$(LD_LIBRARY_PATH="${BUNDLED_DIR}" ldd "${PKG_DIR}/usr/lib/zed/libexec/zed-editor" 2>/dev/null \
   | grep "=> /" \
   | grep -v "${BUNDLED_DIR}" \
-  | awk '{print $3}' \
-  | xargs -r dpkg -S 2>/dev/null \
-  | cut -d: -f1 \
-  | sort -u \
-  | paste -sd ", ")
+  | awk '{print $3}' || true)
+
+AUTO_DEPS=""
+for lib in $SYSTEM_LIBS; do
+  pkg=$(dpkg -S "$lib" 2>/dev/null | cut -d: -f1 | head -1 || true)
+  if [ -n "$pkg" ]; then
+    AUTO_DEPS="${AUTO_DEPS}${AUTO_DEPS:+, }${pkg}"
+  fi
+done
+AUTO_DEPS=$(echo "$AUTO_DEPS" | tr ',' '\n' | sed 's/^ //' | sort -u | paste -sd ", ")
 
 echo "Auto-detected dependencies: ${AUTO_DEPS}"
 
