@@ -126,6 +126,51 @@ fi
 
 gzip -9n "${PKG_DIR}/usr/share/doc/zed/changelog.Debian"
 
+# AppStream metainfo with release notes
+mkdir -p "${PKG_DIR}/usr/share/metainfo"
+RELEASE_DATE_ISO=$(echo "$RELEASE_DATE" | sed 's/T.*//')
+if [ -z "$RELEASE_DATE_ISO" ]; then
+  RELEASE_DATE_ISO=$(date -I)
+fi
+
+# Convert markdown list items to XML <li> elements via sed
+# First strip markdown link syntax [text](url) to plain text, escape XML entities, then wrap in <li>
+if [ -n "$RELEASE_BODY" ]; then
+  RELEASE_LI=$(echo "$RELEASE_BODY" \
+    | tr -d '\r' \
+    | grep -E '^\s*[-*]\s' \
+    | sed 's/^\s*[-*]\s*//' \
+    | sed -E 's/\[([^]]*)\]\([^)]*\)/\1/g' \
+    | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' \
+    | sed 's/^/          <li>/; s/$/<\/li>/')
+fi
+
+cat > "${PKG_DIR}/usr/share/metainfo/zed.metainfo.xml" << METAEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>zed</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Zed</name>
+  <summary>A high-performance, multiplayer code editor</summary>
+  <description>
+    <p>Zed is a high-performance, multiplayer code editor from the creators of Atom and Tree-sitter.</p>
+  </description>
+  <launchable type="desktop-id">zed.desktop</launchable>
+  <url type="homepage">https://zed.dev</url>
+  <url type="bugtracker">https://github.com/zed-industries/zed/issues</url>
+  <releases>
+    <release version="${VERSION}" date="${RELEASE_DATE_ISO}">
+      <description>
+        <ul>
+${RELEASE_LI:-          <li>New upstream release v${VERSION}</li>}
+        </ul>
+      </description>
+    </release>
+  </releases>
+</component>
+METAEOF
+
 # Copyright
 cat > "${PKG_DIR}/usr/share/doc/zed/copyright" << CPEOF
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
