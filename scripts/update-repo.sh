@@ -28,6 +28,21 @@ mkdir -p "${REPO_DIR}/dists/stable/main/binary-amd64"
 # Copy packages to pool
 cp "${PACKAGES_DIR}"/*.deb "${REPO_DIR}/pool/main/"
 
+# Extract changelogs from .deb packages and place them at the path apt expects
+for deb in "${REPO_DIR}"/pool/main/*.deb; do
+  PKG_NAME=$(dpkg-deb -f "$deb" Package)
+  PKG_VERSION=$(dpkg-deb -f "$deb" Version)
+  PREFIX="${PKG_NAME:0:1}"
+  CHANGELOG_DIR="${REPO_DIR}/main/${PREFIX}/${PKG_NAME}/${PKG_NAME}_${PKG_VERSION}"
+  mkdir -p "${CHANGELOG_DIR}"
+  TMPEXTRACT=$(mktemp -d)
+  dpkg-deb -x "$deb" "$TMPEXTRACT"
+  if [ -f "${TMPEXTRACT}/usr/share/doc/${PKG_NAME}/changelog.Debian.gz" ]; then
+    zcat "${TMPEXTRACT}/usr/share/doc/${PKG_NAME}/changelog.Debian.gz" > "${CHANGELOG_DIR}/changelog"
+  fi
+  rm -rf "$TMPEXTRACT"
+done
+
 # Generate Packages file
 cd "${REPO_DIR}"
 dpkg-scanpackages --arch amd64 pool/main /dev/null > dists/stable/main/binary-amd64/Packages
@@ -43,6 +58,7 @@ Suite: stable
 Codename: stable
 Architectures: amd64
 Components: main
+Changelogs: https://xi72yow.github.io/zed-deb/@CHANGEPATH@/changelog
 Description: Unofficial Debian repository for Zed editor
 $(apt-ftparchive release .)
 EOF
