@@ -9,7 +9,7 @@ REVISION="${2:-1}"
 
 if [ -z "$VERSION" ]; then
   echo "Fetching latest Zed release version..."
-  VERSION=$(curl -sL "https://api.github.com/repos/zed-industries/zed/releases/latest"     | grep '"tag_name"' | head -1 | sed 's/.*"v\(.*\)".*//')
+  VERSION=$(curl -sL "https://api.github.com/repos/zed-industries/zed/releases/latest" | jq -r ".tag_name" | sed "s/^v//")
 fi
 
 VERSION="${VERSION#v}"
@@ -91,6 +91,40 @@ fi
 if [ -f "${ZED_DIR}/licenses.md" ]; then
   cp "${ZED_DIR}/licenses.md" "${PKG_DIR}/usr/share/doc/zed/licenses.md"
 fi
+
+# Changelog from GitHub release notes
+echo "Fetching release notes for v${VERSION}..."
+RELEASE_JSON=$(curl -sL "https://api.github.com/repos/zed-industries/zed/releases/tags/v${VERSION}")
+RELEASE_BODY=$(echo "$RELEASE_JSON" | jq -r '.body // empty')
+RELEASE_DATE=$(echo "$RELEASE_JSON" | jq -r '.published_at // empty')
+
+if [ -n "$RELEASE_DATE" ]; then
+  CHANGELOG_DATE=$(date -d "$RELEASE_DATE" -R 2>/dev/null || date -R)
+else
+  CHANGELOG_DATE=$(date -R)
+fi
+
+{
+  echo "zed (${DEB_VERSION}) stable; urgency=medium"
+  echo ""
+  if [ -n "$RELEASE_BODY" ]; then
+    echo "$RELEASE_BODY" | while IFS= read -r line; do
+      # Convert markdown list items to changelog entries
+      if echo "$line" | grep -qE '^\s*[-*]'; then
+        cleaned=$(echo "$line" | sed 's/^\s*[-*]\s*//')
+        echo "  * $cleaned"
+      elif [ -n "$line" ]; then
+        echo "  $line"
+      fi
+    done
+  else
+    echo "  * New upstream release v${VERSION}"
+  fi
+  echo ""
+  echo " -- zed-deb repository <noreply@github.com>  ${CHANGELOG_DATE}"
+} > "${PKG_DIR}/usr/share/doc/zed/changelog.Debian"
+
+gzip -9n "${PKG_DIR}/usr/share/doc/zed/changelog.Debian"
 
 # Copyright
 cat > "${PKG_DIR}/usr/share/doc/zed/copyright" << CPEOF
