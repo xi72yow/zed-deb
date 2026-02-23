@@ -71,9 +71,12 @@ done 2>/dev/null || true
 # .desktop file
 if [ -f "${ZED_DIR}/share/applications/zed.desktop" ]; then
   cp "${ZED_DIR}/share/applications/zed.desktop" "${PKG_DIR}/usr/share/applications/"
-  # Ensure StartupWMClass is set so GNOME dock can match the window to the .desktop entry
-  if ! grep -q '^StartupWMClass=' "${PKG_DIR}/usr/share/applications/zed.desktop"; then
-    echo 'StartupWMClass=dev.zed.Zed' >> "${PKG_DIR}/usr/share/applications/zed.desktop"
+  # Ensure StartupWMClass is set in the [Desktop Entry] section so GNOME/Wayland
+  # can match the window's app_id to the .desktop file for proper dock grouping.
+  # We must insert it into the main section, not just append (which lands in the last section).
+  DESKTOP_FILE="${PKG_DIR}/usr/share/applications/zed.desktop"
+  if ! sed -n '/^\[Desktop Entry\]/,/^\[/p' "$DESKTOP_FILE" | grep -q '^StartupWMClass='; then
+    sed -i '/^\[Desktop Entry\]/a StartupWMClass=dev.zed.Zed' "$DESKTOP_FILE"
   fi
 else
   cat > "${PKG_DIR}/usr/share/applications/zed.desktop" << DSKEOF
