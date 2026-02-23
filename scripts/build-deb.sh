@@ -71,6 +71,10 @@ done 2>/dev/null || true
 # .desktop file
 if [ -f "${ZED_DIR}/share/applications/zed.desktop" ]; then
   cp "${ZED_DIR}/share/applications/zed.desktop" "${PKG_DIR}/usr/share/applications/"
+  # Ensure StartupWMClass is set so GNOME dock can match the window to the .desktop entry
+  if ! grep -q '^StartupWMClass=' "${PKG_DIR}/usr/share/applications/zed.desktop"; then
+    echo 'StartupWMClass=dev.zed.Zed' >> "${PKG_DIR}/usr/share/applications/zed.desktop"
+  fi
 else
   cat > "${PKG_DIR}/usr/share/applications/zed.desktop" << DSKEOF
 [Desktop Entry]
@@ -82,7 +86,7 @@ Icon=zed
 Terminal=false
 Categories=Development;TextEditor;IDE;
 MimeType=text/plain;inode/directory;
-StartupWMClass=Zed
+StartupWMClass=dev.zed.Zed
 Keywords=text;editor;code;
 DSKEOF
 fi
