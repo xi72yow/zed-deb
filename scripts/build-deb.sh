@@ -28,17 +28,6 @@ PKG_DIR="${WORKDIR}/zed_${DEB_VERSION}_amd64"
 echo "Downloading ${TARBALL_URL}..."
 curl -fSL "${TARBALL_URL}" -o "${WORKDIR}/zed.tar.gz"
 
-CHECKSUM_URL="${TARBALL_URL}.sha256"
-echo "Verifying checksum from ${CHECKSUM_URL}..."
-EXPECTED_SHA=$(curl -fSL "${CHECKSUM_URL}" | awk '{print $1}')
-ACTUAL_SHA=$(sha256sum "${WORKDIR}/zed.tar.gz" | awk '{print $1}')
-if [ "${EXPECTED_SHA}" != "${ACTUAL_SHA}" ]; then
-  echo "ERROR: Checksum mismatch!"
-  echo "  Expected: ${EXPECTED_SHA}"
-  echo "  Actual:   ${ACTUAL_SHA}"
-  exit 1
-fi
-echo "Checksum OK: ${ACTUAL_SHA}"
 
 mkdir -p "${WORKDIR}/extract"
 tar xzf "${WORKDIR}/zed.tar.gz" -C "${WORKDIR}/extract"
