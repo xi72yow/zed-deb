@@ -31,7 +31,7 @@ jobs:
           INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           if [ -n "${INPUT_VERSION}" ]; then
-            VERSION="${INPUT_VERSION}"
+            VERSION="$(echo "${INPUT_VERSION}" | sed 's/^[[:space:]]*v\?//; s/[[:space:]]*$//')"
           else
             VERSION=$(curl -sL "https://api.github.com/repos/zed-industries/zed/releases/latest" \
               | jq -r ".tag_name" | sed "s/^v//")

@@ -12,7 +12,9 @@ if [ -z "$VERSION" ]; then
   VERSION=$(curl -sL "https://api.github.com/repos/zed-industries/zed/releases/latest" | jq -r ".tag_name" | sed "s/^v//")
 fi
 
+# Strip leading v and whitespace
 VERSION="${VERSION#v}"
+VERSION="$(echo "$VERSION" | xargs)"
 
 echo "Building zed ${VERSION}-${REVISION} for amd64..."
 
