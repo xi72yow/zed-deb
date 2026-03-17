@@ -80,10 +80,10 @@ jobs:
         run: |
           DEB=$(ls packages/zed_*.deb)
           echo "=== Package structure ==="
-          dpkg-deb -c "$DEB" | grep -E '(usr/bin/zed|usr/lib/zed/bin/zed|usr/lib/zed/libexec/zed-editor|usr/share/applications/zed.desktop)'
+          dpkg-deb -c "$DEB" | grep -E '(usr/bin/zed|usr/lib/zed/bin/zed|usr/lib/zed/libexec/zed-editor|usr/share/applications/dev.zed.Zed.desktop)'
 
           echo "=== Verifying required files ==="
-          for path in ./usr/bin/zed ./usr/lib/zed/bin/zed ./usr/lib/zed/libexec/zed-editor ./usr/share/applications/zed.desktop; do
+          for path in ./usr/bin/zed ./usr/lib/zed/bin/zed ./usr/lib/zed/libexec/zed-editor ./usr/share/applications/dev.zed.Zed.desktop; do
             if ! dpkg-deb -c "$DEB" 2>/dev/null | grep -q "$path"; then
               echo "MISSING: $path"
               exit 1

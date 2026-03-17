@@ -81,29 +81,33 @@ for icon in "${ZED_DIR}/share/icons/hicolor/"*/"apps/"*; do
   fi
 done 2>/dev/null || true
 
-# .desktop file
-if [ -f "${ZED_DIR}/share/applications/zed.desktop" ]; then
-  cp "${ZED_DIR}/share/applications/zed.desktop" "${PKG_DIR}/usr/share/applications/"
-  # Ensure StartupWMClass is set in the [Desktop Entry] section so GNOME/Wayland
-  # can match the window's app_id to the .desktop file for proper dock grouping.
-  # We must insert it into the main section, not just append (which lands in the last section).
-  DESKTOP_FILE="${PKG_DIR}/usr/share/applications/zed.desktop"
+# .desktop file – must be named dev.zed.Zed.desktop so GNOME/Wayland can match
+# the window app_id (dev.zed.Zed) to the correct .desktop file for dock/tray icons.
+UPSTREAM_DESKTOP=$(find "${ZED_DIR}/share/applications" -name '*.desktop' -print -quit 2>/dev/null || true)
+if [ -n "$UPSTREAM_DESKTOP" ] && [ -f "$UPSTREAM_DESKTOP" ]; then
+  cp "$UPSTREAM_DESKTOP" "${PKG_DIR}/usr/share/applications/dev.zed.Zed.desktop"
+  DESKTOP_FILE="${PKG_DIR}/usr/share/applications/dev.zed.Zed.desktop"
+  # Ensure StartupWMClass is set for X11 fallback
   if ! sed -n '/^\[Desktop Entry\]/,/^\[/p' "$DESKTOP_FILE" | grep -q '^StartupWMClass='; then
     sed -i '/^\[Desktop Entry\]/a StartupWMClass=dev.zed.Zed' "$DESKTOP_FILE"
   fi
+  # Fix Exec= to use our wrapper path
+  sed -i 's|^Exec=zed|Exec=/usr/bin/zed|' "$DESKTOP_FILE"
+  sed -i 's|^TryExec=zed|TryExec=/usr/bin/zed|' "$DESKTOP_FILE"
 else
-  cat > "${PKG_DIR}/usr/share/applications/zed.desktop" << DSKEOF
+  cat > "${PKG_DIR}/usr/share/applications/dev.zed.Zed.desktop" << DSKEOF
 [Desktop Entry]
 Type=Application
 Name=Zed
 Comment=A high-performance, multiplayer code editor
-Exec=/usr/lib/zed/zed %F
+Exec=/usr/bin/zed %U
 Icon=zed
 Terminal=false
-Categories=Development;TextEditor;IDE;
-MimeType=text/plain;inode/directory;
+Categories=Utility;TextEditor;Development;IDE;
+MimeType=text/plain;application/x-zerosize;x-scheme-handler/zed;
 StartupWMClass=dev.zed.Zed
-Keywords=text;editor;code;
+StartupNotify=true
+Keywords=zed;
 DSKEOF
 fi
 
@@ -176,7 +180,7 @@ cat > "${PKG_DIR}/usr/share/metainfo/zed.metainfo.xml" << METAEOF
   <description>
     <p>Zed is a high-performance, multiplayer code editor from the creators of Atom and Tree-sitter.</p>
   </description>
-  <launchable type="desktop-id">zed.desktop</launchable>
+  <launchable type="desktop-id">dev.zed.Zed.desktop</launchable>
   <url type="homepage">https://zed.dev</url>
   <url type="bugtracker">https://github.com/zed-industries/zed/issues</url>
   <releases>
@@ -223,6 +227,31 @@ Description: A high-performance, multiplayer code editor
  Zed is a high-performance, multiplayer code editor from the creators
  of Atom and Tree-sitter.
 CTLEOF
+
+# Maintainer scripts to update icon cache and desktop database
+cat > "${PKG_DIR}/DEBIAN/postinst" << 'POSTEOF'
+#!/bin/bash
+set -e
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/share/applications 2>/dev/null || true
+fi
+POSTEOF
+chmod 755 "${PKG_DIR}/DEBIAN/postinst"
+
+cat > "${PKG_DIR}/DEBIAN/postrm" << 'POSTEOF'
+#!/bin/bash
+set -e
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/share/applications 2>/dev/null || true
+fi
+POSTEOF
+chmod 755 "${PKG_DIR}/DEBIAN/postrm"
 
 dpkg-deb --build --root-owner-group "${PKG_DIR}"
 
