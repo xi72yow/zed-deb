@@ -29,12 +29,19 @@ jobs:
         id: version
         env:
           INPUT_VERSION: ${{ github.event.inputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -n "${INPUT_VERSION}" ]; then
             VERSION="$(echo "${INPUT_VERSION}" | sed 's/^[[:space:]]*v\?//; s/[[:space:]]*$//')"
           else
-            VERSION=$(curl -sL "https://api.github.com/repos/zed-industries/zed/releases/latest" \
+            VERSION=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" \
+              "https://api.github.com/repos/zed-industries/zed/releases/latest" \
               | jq -r ".tag_name" | sed "s/^v//")
+          fi
+
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "::error::Failed to determine Zed version from GitHub API"
+            exit 1
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
