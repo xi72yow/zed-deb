@@ -7,9 +7,13 @@ set -euo pipefail
 VERSION="${1:-}"
 REVISION="${2:-1}"
 
+# a stalled transfer would otherwise hang until the ci job limit kills it
+CURL_API=(-sL --connect-timeout 20 --max-time 60 --retry 3 --retry-all-errors)
+CURL_DOWNLOAD=(-fSL --connect-timeout 20 --max-time 900 --retry 3 --retry-all-errors)
+
 if [ -z "$VERSION" ]; then
   echo "Fetching latest Zed release version..."
-  VERSION=$(curl -sL "https://api.github.com/repos/zed-industries/zed/releases/latest" | jq -r ".tag_name" | sed "s/^v//")
+  VERSION=$(curl "${CURL_API[@]}" "https://api.github.com/repos/zed-industries/zed/releases/latest" | jq -r ".tag_name" | sed "s/^v//")
 fi
 
 # Strip leading v and whitespace
@@ -26,7 +30,7 @@ DEB_VERSION="${VERSION}-${REVISION}"
 PKG_DIR="${WORKDIR}/zed_${DEB_VERSION}_amd64"
 
 echo "Downloading ${TARBALL_URL}..."
-curl -fSL "${TARBALL_URL}" -o "${WORKDIR}/zed.tar.gz"
+curl "${CURL_DOWNLOAD[@]}" "${TARBALL_URL}" -o "${WORKDIR}/zed.tar.gz"
 
 
 mkdir -p "${WORKDIR}/extract"
@@ -109,7 +113,7 @@ fi
 
 # Changelog from GitHub release notes
 echo "Fetching release notes for v${VERSION}..."
-RELEASE_JSON=$(curl -sL "https://api.github.com/repos/zed-industries/zed/releases/tags/v${VERSION}")
+RELEASE_JSON=$(curl "${CURL_API[@]}" "https://api.github.com/repos/zed-industries/zed/releases/tags/v${VERSION}")
 RELEASE_BODY=$(echo "$RELEASE_JSON" | jq -r '.body // empty')
 RELEASE_DATE=$(echo "$RELEASE_JSON" | jq -r '.published_at // empty')
 

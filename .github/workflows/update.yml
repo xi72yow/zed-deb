@@ -17,6 +17,8 @@ permissions:
 jobs:
   check-and-build:
     runs-on: ubuntu-latest
+    # fail fast on stalled downloads instead of burning the 6h job limit
+    timeout-minutes: 20
     outputs:
       skipped: ${{ steps.version.outputs.skip }}
     steps:
@@ -34,7 +36,8 @@ jobs:
           if [ -n "${INPUT_VERSION}" ]; then
             VERSION="$(echo "${INPUT_VERSION}" | sed 's/^[[:space:]]*v\?//; s/[[:space:]]*$//')"
           else
-            VERSION=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" \
+            VERSION=$(curl -sL --connect-timeout 20 --max-time 60 --retry 3 --retry-all-errors \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
               "https://api.github.com/repos/zed-industries/zed/releases/latest" \
               | jq -r ".tag_name" | sed "s/^v//")
           fi
