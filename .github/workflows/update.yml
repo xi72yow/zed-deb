@@ -13,6 +13,8 @@ permissions:
   contents: write
   pages: write
   id-token: write
+  # deploy-pages resolves the artifact by id since v4
+  actions: read
 
 jobs:
   check-and-build:
@@ -23,7 +25,7 @@ jobs:
       skipped: ${{ steps.version.outputs.skip }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -128,7 +130,7 @@ jobs:
 
       - name: Upload repo artifact
         if: steps.version.outputs.skip != 'true'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: repo/
 
@@ -142,4 +144,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
