@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+# Starts the pinned Claude ACP agent, configured as a custom agent server in Zed
+
+AGENT="${ZED_ACP_PIN_DIR:-$HOME/.local/share/zed-acp-pin}/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"
+
+if [ ! -f "$AGENT" ]; then
+  echo "no pinned agent found, run: zed-acp-pin-update latest" >&2
+  exit 1
+fi
+
+for candidate in /usr/lib/nodejs-24/bin/node /usr/lib/nodejs-22/bin/node; do
+  if [ -x "$candidate" ]; then
+    NODE="$candidate"
+    break
+  fi
+done
+
+# the bundled binary has its own updater, which would bypass the pin
+DISABLE_AUTOUPDATER=1 exec "${NODE:-node}" "$AGENT" "$@"

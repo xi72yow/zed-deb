@@ -30,6 +30,14 @@ sudo apt remove zed
 sudo rm /etc/apt/sources.list.d/zed.list /usr/share/keyrings/zed-deb.gpg
 ```
 
+## zed-acp-pin
+
+Optional package that pins the Claude ACP agent for Zed and updates it weekly, only to releases older than seven days. It ships no agent code, see [acp-deb/README.md](acp-deb/README.md).
+
+```bash
+sudo apt install zed-acp-pin
+```
+
 ## Setup (for repository maintainers)
 
 ### 1. Create a GPG key

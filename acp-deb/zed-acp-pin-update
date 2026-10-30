@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Keeps a pinned copy of the Claude ACP agent for Zed, see acp-deb/README.md
+# Usage: zed-acp-pin-update <version|latest|--auto>
+
+PKG="@agentclientprotocol/claude-agent-acp"
+TARGET="${ZED_ACP_PIN_DIR:-$HOME/.local/share/zed-acp-pin}"
+STAGING="$TARGET.staging"
+PREVIOUS="$TARGET.previous"
+IMAGE="node:22-slim"
+PRESENTATION="node_modules/$PKG/dist/permissions/presentation.js"
+MIN_AGE_DAYS="${ZED_ACP_PIN_MIN_AGE_DAYS:-7}"
+JOURNAL_HINT="Details: journalctl --user -u zed-acp-pin-update"
+
+# compromised releases tend to be caught within days, so fresh ones are skipped
+read -r -d '' RESOLVE_SETTLED_JS <<'EOF' || true
+const times = JSON.parse(require("fs").readFileSync(0));
+const cutoff = Date.now() - process.env.MIN_AGE_DAYS * 86400000;
+const [newest] = Object.entries(times)
+  .filter(([version, date]) => /^\d+\.\d+\.\d+$/.test(version) && Date.parse(date) <= cutoff)
+  .sort(([, a], [, b]) => Date.parse(b) - Date.parse(a));
+if (!newest) process.exit(1);
+console.log(newest[0]);
+EOF
+
+read -r -d '' PERMISSION_TITLE_JS <<EOF || true
+import('/app/$PRESENTATION').then(m => {
+  const r = m.buildClaudePermissionPresentation({
+    toolName: 'Bash',
+    toolUseID: 't1',
+    input: { command: 'ls -la /tmp', description: 'List files' },
+  });
+  console.log(r.toolCall.title);
+});
+EOF
+
+installed_version() {
+  local manifest="$TARGET/node_modules/$PKG/package.json"
+  [ -f "$manifest" ] || { echo "none"; return; }
+  sed -n 's/^ *"version": "\(.*\)",$/\1/p' "$manifest" | head -1
+}
+
+settled_version() {
+  podman run --rm -e MIN_AGE_DAYS="$MIN_AGE_DAYS" "$IMAGE" \
+    sh -c 'npm view "$1" time --json 2>/dev/null | node -e "$2"' sh "$PKG" "$RESOLVE_SETTLED_JS" </dev/null
+}
+
+notify() {
+  gdbus call --session \
+    --dest org.freedesktop.Notifications \
+    --object-path /org/freedesktop/Notifications \
+    --method org.freedesktop.Notifications.Notify \
+    "zed-acp-pin" 0 "$1" "$2" "$3" "[]" "{}" 0 >/dev/null
+}
+
+auto_update() {
+  local installed settled
+  installed=$(installed_version)
+  if ! settled=$(settled_version); then
+    notify "dialog-error" "Zed ACP pin: update check failed" "Staying on $installed. $JOURNAL_HINT"
+    exit 1
+  fi
+  if [ "$installed" = "$settled" ]; then
+    echo "up to date: $installed"
+    return
+  fi
+
+  # a function call in this condition would run with set -e disabled
+  if ! "${BASH_SOURCE[0]}" "$settled"; then
+    notify "dialog-error" "Zed ACP pin: update to $settled failed" "Staying on $installed. $JOURNAL_HINT"
+    exit 1
+  fi
+  notify "software-update-available" "Zed ACP pin: $installed → $settled" \
+    "Installed, active after restarting Zed. Previous version: $PREVIOUS"
+}
+
+install_version() {
+  local version="$1"
+  echo "==> installing $PKG@$version into $STAGING"
+  rm -rf "$STAGING"
+  mkdir -p "$STAGING"
+  podman run --rm -v "$STAGING:/app:Z" -w /app "$IMAGE" sh -c \
+    'npm install --save-exact --ignore-scripts --no-fund --no-audit "$1" && npm audit signatures' \
+    sh "$PKG@$version" </dev/null
+
+  echo "==> verifying permission title"
+  local title
+  title=$(podman run --rm -v "$STAGING:/app:Z" -w /app "$IMAGE" node -e "$PERMISSION_TITLE_JS" </dev/null)
+  if [ "$title" != "ls -la /tmp" ]; then
+    echo "verification failed, title is '$title', expected the command, $TARGET unchanged" >&2
+    exit 1
+  fi
+
+  rm -rf "$PREVIOUS"
+  if [ -d "$TARGET" ]; then mv "$TARGET" "$PREVIOUS"; fi
+  mv "$STAGING" "$TARGET"
+
+  echo "==> ok, $PKG@$(installed_version) shows the command in the permission card"
+  echo "previous version kept in $PREVIOUS, restart zed to pick up the new one"
+}
+
+case "${1:-}" in
+  "")
+    cat <<EOF
+usage: $(basename "$0") <version|latest|--auto>
+
+installed: $(installed_version)
+latest:    newest stable release older than $MIN_AGE_DAYS days
+--auto:    installs latest if it differs, reports via desktop notification
+<version>: installs exactly this version, bypasses the minimum age
+EOF
+    ;;
+  --auto) auto_update ;;
+  latest) install_version "$(settled_version)" ;;
+  *) install_version "$1" ;;
+esac

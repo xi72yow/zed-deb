@@ -1,0 +1,6 @@
+[Unit]
+Description=Update the pinned Zed ACP agent to a settled release
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/zed-acp-pin-update --auto

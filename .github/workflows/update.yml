@@ -112,6 +112,13 @@ jobs:
           echo "=== Check library dependencies ==="
           ldd /usr/lib/zed/libexec/zed-editor | grep "not found" && exit 1 || echo "All libraries resolved."
 
+      # the pages deploy replaces the whole site, so every run has to rebuild it
+      - name: Build zed-acp-pin .deb package
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          ./scripts/build-acp-deb.sh
+          dpkg-deb -c packages/zed-acp-pin_*.deb | grep -q './usr/bin/zed-acp-pin-update'
+
       - name: Update APT repository
         if: steps.version.outputs.skip != 'true'
         env:
