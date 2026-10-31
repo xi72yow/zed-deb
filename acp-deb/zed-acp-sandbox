@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Starts the pinned Claude ACP agent in a podman sandbox, configured as custom agent server in Zed
-# Usage: zed-acp-sandbox <work|yolo> | shell <work|yolo> [command...] | login | build
+# Usage: zed-acp-sandbox <work|yolo> | shell <work|yolo> [command...] | login [--paste] | build
 # stdout belongs to the ACP protocol, own output goes to stderr
 
 IMAGE_ID="@IMAGE_ID@"
@@ -35,7 +35,7 @@ claude_token() {
 # a long-lived token instead of the refreshing credentials of ~/.claude: a refresh inside the
 # sandbox takes its lock in another config dir and would rotate the token under the host sessions
 login() {
-  local arch claude token
+  local arch claude token="" line
   case "$(uname -m)" in
     x86_64) arch=x64 ;;
     aarch64) arch=arm64 ;;
@@ -45,10 +45,23 @@ login() {
   [ -x "$claude" ] || die "no pinned agent found, run: zed-acp-pin-update latest"
   [ -t 0 ] || die "login needs a terminal"
 
-  log "creating a long-lived token with the pinned claude, it is printed at the end"
-  "$claude" setup-token
-  read -rsp "paste the token: " token
-  echo >&2
+  if [ "${1:-}" != --paste ]; then
+    log "creating a long-lived token with the pinned claude, it is printed at the end"
+    "$claude" setup-token
+  fi
+
+  # the terminal wraps the long token, so a paste may span several lines
+  log "paste the token, then press enter on an empty line"
+  while IFS= read -rs line && [ -n "$line" ]; do
+    token+="$line"
+  done
+  token="${token//[[:space:]]/}"
+  [[ "$token" =~ ^sk-ant-oat01-[A-Za-z0-9_-]+$ ]] || die "this does not look like a token from setup-token, nothing stored"
+
+  log "checking the token with a minimal prompt"
+  if ! (cd "$(mktemp -d)" && CLAUDE_CODE_OAUTH_TOKEN="$token" "$claude" -p "reply with ok" --model haiku </dev/null >/dev/null); then
+    die "the token was rejected, nothing stored"
+  fi
   printf '%s' "$token" | claude_token set
   log "token stored in the keyring"
 }
@@ -193,8 +206,8 @@ case "${1:-}" in
     case "${2:-}" in work|yolo) ;; *) die "usage: zed-acp-sandbox shell <work|yolo> [command...]" ;; esac
     if [ $# -gt 2 ]; then run_sandbox "$2" "${@:3}"; else run_sandbox "$2" bash; fi
     ;;
-  login) login ;;
+  login) login "${2:-}" ;;
   # explicit builds skip the cache, so debian security updates reach the image
   build) build_image --no-cache ;;
-  *) die "usage: zed-acp-sandbox <work|yolo> | shell <work|yolo> [command...] | login | build" ;;
+  *) die "usage: zed-acp-sandbox <work|yolo> | shell <work|yolo> [command...] | login [--paste] | build" ;;
 esac

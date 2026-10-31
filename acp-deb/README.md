@@ -83,7 +83,7 @@ Runs the pinned agent in a rootless podman container, as two agent servers next 
 ```bash
 sudo apt install zed-acp-sandbox
 zed-acp-sandbox build     # builds the local image, otherwise the first start in Zed does it
-zed-acp-sandbox login     # creates a long-lived token with the pinned claude, stored in the keyring
+zed-acp-sandbox login     # creates a long-lived token with the pinned claude, checks it and stores it in the keyring
 ```
 
 ```json
