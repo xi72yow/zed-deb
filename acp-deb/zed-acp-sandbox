@@ -48,14 +48,21 @@ login() {
   if [ "${1:-}" != --paste ]; then
     log "creating a long-lived token with the pinned claude, it is printed at the end"
     "$claude" setup-token
+    # the tui of claude may leave the terminal in raw mode, where enter never ends a line
+    stty sane
   fi
 
-  # the terminal wraps the long token, so a paste may span several lines
-  log "paste the token, then press enter on an empty line"
-  while IFS= read -rs line && [ -n "$line" ]; do
+  # the terminal wraps the long token, so a paste may span several lines; bracketed paste
+  # markers and carriage returns are stripped
+  log "paste the token (input stays hidden), then press enter on an empty line"
+  while IFS= read -rs line; do
+    line="${line//$'\e[200~'/}"
+    line="${line//$'\e[201~'/}"
+    line="${line//[[:space:]]/}"
+    [ -n "$line" ] || break
     token+="$line"
+    log "received ${#line} characters, ${#token} in total, enter on an empty line finishes"
   done
-  token="${token//[[:space:]]/}"
   [[ "$token" =~ ^sk-ant-oat01-[A-Za-z0-9_-]+$ ]] || die "this does not look like a token from setup-token, nothing stored"
 
   log "checking the token with a minimal prompt"
