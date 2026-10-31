@@ -1,0 +1,29 @@
+#!/bin/sh
+# Rejects commands that destroy history or leave the machine. A hurdle against mistakes,
+# not a boundary: /usr/bin/git stays reachable. Hooks and config are protected by read-only mounts.
+
+reject() {
+  echo "git $*: blocked in the sandbox, run it on the host if it is really intended" >&2
+  exit 1
+}
+
+subcommand=""
+skip_value=""
+for arg in "$@"; do
+  if [ -n "$skip_value" ]; then skip_value=""; continue; fi
+  case "$arg" in
+    -C|-c|--git-dir|--work-tree|--namespace|--exec-path) skip_value=1 ;;
+    -*) ;;
+    *) subcommand="$arg"; break ;;
+  esac
+done
+
+case "$subcommand" in
+  push|prune) reject "$@" ;;
+  reflog)
+    case " $* " in *" expire "*|*" delete "*) reject "$@" ;; esac ;;
+  gc)
+    case " $* " in *" --prune=now "*|*" --prune=all "*|*" --prune=0 "*) reject "$@" ;; esac ;;
+esac
+
+exec /usr/bin/git "$@"

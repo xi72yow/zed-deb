@@ -1,5 +1,5 @@
 [Unit]
-Description=Update the pinned Zed ACP agent to a settled release
+Description=Update the pinned Zed ACP agent to a settled release and audit it
 
 [Service]
 Type=oneshot

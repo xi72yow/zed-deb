@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Starts the pinned Claude ACP agent in a podman sandbox, configured as custom agent server in Zed
+# Usage: zed-acp-sandbox <work|yolo> | shell <work|yolo> [command...] | login | build
+# stdout belongs to the ACP protocol, own output goes to stderr
+
+IMAGE_ID="@IMAGE_ID@"
+SHARE=/usr/share/zed-acp-sandbox
+IMAGE="localhost/zed-acp-sandbox:$IMAGE_ID-uid$(id -u)"
+PIN_DIR="${ZED_ACP_PIN_DIR:-$HOME/.local/share/zed-acp-pin}"
+AGENT="$PIN_DIR/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/zed-acp-sandbox"
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/zed-acp-sandbox/settings.json"
+STORAGE_VOLUME="zed-acp-sandbox-storage"
+SANDBOX_HOME=/home/agent
+PROJECT="$PWD"
+MOUNTS=()
+
+log() { echo "zed-acp-sandbox: $*" >&2; }
+die() { log "$*"; exit 1; }
+
+host_node() {
+  local candidate
+  for candidate in /usr/lib/nodejs-24/bin/node /usr/lib/nodejs-22/bin/node; do
+    [ -x "$candidate" ] && { "$candidate" "$@"; return; }
+  done
+  node "$@"
+}
+
+claude_token() {
+  host_node "$SHARE/claude-token.mjs" "$@"
+}
+
+# a long-lived token instead of the refreshing credentials of ~/.claude: a refresh inside the
+# sandbox takes its lock in another config dir and would rotate the token under the host sessions
+login() {
+  local arch claude token
+  case "$(uname -m)" in
+    x86_64) arch=x64 ;;
+    aarch64) arch=arm64 ;;
+    *) die "unsupported architecture $(uname -m)" ;;
+  esac
+  claude="$PIN_DIR/node_modules/@anthropic-ai/claude-agent-sdk-linux-$arch/claude"
+  [ -x "$claude" ] || die "no pinned agent found, run: zed-acp-pin-update latest"
+  [ -t 0 ] || die "login needs a terminal"
+
+  log "creating a long-lived token with the pinned claude, it is printed at the end"
+  "$claude" setup-token
+  read -rsp "paste the token: " token
+  echo >&2
+  printf '%s' "$token" | claude_token set
+  log "token stored in the keyring"
+}
+
+build_image() {
+  log "building $IMAGE"
+  podman build "$@" --build-arg UID="$(id -u)" -t "$IMAGE" "$SHARE/image" </dev/null >&2
+  podman images --format '{{.Repository}}:{{.Tag}}' \
+    | grep "^localhost/zed-acp-sandbox:.*-uid$(id -u)$" | grep -vx "$IMAGE" \
+    | xargs -r podman rmi >&2 || true
+}
+
+check_project() {
+  local profile="$1"
+  case "$PROJECT" in
+    /|"$HOME") die "refusing to mount $PROJECT, open a project directory in Zed" ;;
+  esac
+  [ "$profile" = yolo ] || return 0
+  [ -d "$PROJECT/.git" ] || die "yolo needs a git repository with a .git directory in $PROJECT"
+  if [ -n "$(git -C "$PROJECT" status --porcelain 2>/dev/null)" ]; then
+    log "warning: uncommitted changes in $PROJECT will mix with the changes of yolo"
+  fi
+}
+
+# the network settings live on the host, a project could otherwise open its own firewall
+read_settings() {
+  local json='{}'
+  [ -f "$CONFIG" ] && json=$(<"$CONFIG")
+  jq -r --arg project "$PROJECT" '
+    (.projects[$project] // {}) as $p
+    | ($p.network // .network // "strict"),
+      ((.domains // []) + ($p.domains // []) | join(",")),
+      ($p.kvm // false)' <<<"$json"
+}
+
+# hooks and config would run on the host with the next git call there
+mount_git_protection() {
+  local gitdir
+  [ -d "$PROJECT/.git" ] || return 0
+  while read -r gitdir; do
+    mkdir -p "$gitdir/hooks"
+    MOUNTS+=(-v "$gitdir/hooks:$gitdir/hooks:ro")
+    [ -f "$gitdir/config" ] && MOUNTS+=(-v "$gitdir/config:$gitdir/config:ro")
+  done < <(
+    echo "$PROJECT/.git"
+    [ -d "$PROJECT/.git/modules" ] && find "$PROJECT/.git/modules" -type d -name objects -printf '%h\n'
+  )
+}
+
+# own claude home per profile, a writable ~/.claude would let hooks reach zed-admin on the host
+prepare_claude_home() {
+  local profile="$1" state="$DATA/$1" dir entry mode_filter='.'
+  mkdir -p "$state/claude"
+
+  if [ ! -f "$state/claude.json" ]; then
+    jq '{oauthAccount, userID, hasCompletedOnboarding} | with_entries(select(.value != null))' \
+      "$HOME/.claude.json" > "$state/claude.json" 2>/dev/null || echo '{}' > "$state/claude.json"
+  fi
+
+  [ "$profile" = yolo ] && mode_filter='.permissions.defaultMode = "bypassPermissions"'
+  jq "del(.hooks, .statusLine) | $mode_filter" "$HOME/.claude/settings.json" \
+    > "$state/claude/settings.json" 2>/dev/null || jq -n "$mode_filter" > "$state/claude/settings.json"
+
+  # symlinks are resolved, their targets are not mounted
+  for dir in skills agents output-styles commands; do
+    rm -rf "${state:?}/claude/$dir"
+    [ -d "$HOME/.claude/$dir" ] || continue
+    for entry in "$HOME/.claude/$dir"/*; do
+      [ -e "$entry" ] || continue
+      overlay_claude_home "$state" "$(readlink -f "$entry")" "$dir/${entry##*/}" ro
+    done
+  done
+  [ -f "$HOME/.claude/CLAUDE.md" ] && overlay_claude_home "$state" "$HOME/.claude/CLAUDE.md" CLAUDE.md ro
+
+  MOUNTS+=(-v "$state/claude:$SANDBOX_HOME/.claude" -v "$state/claude.json:$SANDBOX_HOME/.claude.json")
+}
+
+# podman would create a missing mount point as container root, which the host user cannot remove
+overlay_claude_home() {
+  local state="$1" source="$2" target="$3" mode="$4" stub="$1/claude/$3"
+  if [ -d "$source" ]; then
+    mkdir -p "$stub"
+  else
+    mkdir -p "${stub%/*}"
+    touch "$stub"
+  fi
+  MOUNTS+=(-v "$source:$SANDBOX_HOME/.claude/$target:$mode")
+}
+
+run_sandbox() {
+  local profile="$1" settings network domains kvm
+  shift
+  check_project "$profile"
+  podman image exists "$IMAGE" || build_image
+
+  # one line per value, an empty domain list stays an empty line
+  settings=$(read_settings)
+  { read -r network; read -r domains; read -r kvm; } <<<"$settings"
+  log "$profile in $PROJECT, network $network${domains:+, extra domains $domains}"
+
+  local extra=()
+  [ "$kvm" = true ] && extra+=(--device /dev/kvm)
+  [ -t 0 ] && extra+=(-t)
+  [ -f "$HOME/.gitconfig" ] && extra+=(-v "$HOME/.gitconfig:$SANDBOX_HOME/.gitconfig:ro")
+  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    extra+=(-e ANTHROPIC_API_KEY)
+  else
+    CLAUDE_CODE_OAUTH_TOKEN=$(claude_token get) || die "no claude token in the keyring, run: zed-acp-sandbox login"
+    export CLAUDE_CODE_OAUTH_TOKEN
+    extra+=(-e CLAUDE_CODE_OAUTH_TOKEN)
+  fi
+
+  prepare_claude_home "$profile"
+  mount_git_protection
+
+  exec podman run --rm -i \
+    --userns=keep-id \
+    --cap-drop=ALL \
+    --cap-add=NET_ADMIN,NET_RAW,NET_BIND_SERVICE,CHOWN,DAC_OVERRIDE,FOWNER,FSETID,KILL,SETGID,SETUID,SETPCAP,SYS_CHROOT,SETFCAP \
+    --security-opt unmask=/proc/* \
+    --device /dev/fuse \
+    --device /dev/net/tun \
+    --pids-limit 4096 \
+    --memory 16g \
+    --tmpfs /tmp:rw,noexec,nosuid,size=1g \
+    -v "$STORAGE_VOLUME:$SANDBOX_HOME/.local/share/containers" \
+    -v "$PIN_DIR:$PIN_DIR:ro" \
+    -v "$PROJECT:$PROJECT" \
+    -w "$PROJECT" \
+    -e DISABLE_AUTOUPDATER=1 \
+    "${extra[@]}" \
+    "${MOUNTS[@]}" \
+    "$IMAGE" "$network" "$domains" "$@"
+}
+
+case "${1:-}" in
+  work|yolo)
+    [ -f "$AGENT" ] || die "no pinned agent found, run: zed-acp-pin-update latest"
+    run_sandbox "$1" node "$AGENT" "${@:2}"
+    ;;
+  shell)
+    case "${2:-}" in work|yolo) ;; *) die "usage: zed-acp-sandbox shell <work|yolo> [command...]" ;; esac
+    if [ $# -gt 2 ]; then run_sandbox "$2" "${@:3}"; else run_sandbox "$2" bash; fi
+    ;;
+  login) login ;;
+  # explicit builds skip the cache, so debian security updates reach the image
+  build) build_image --no-cache ;;
+  *) die "usage: zed-acp-sandbox <work|yolo> | shell <work|yolo> [command...] | login | build" ;;
+esac

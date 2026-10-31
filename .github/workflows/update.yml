@@ -118,6 +118,10 @@ jobs:
         run: |
           ./scripts/build-acp-deb.sh
           dpkg-deb -c packages/zed-acp-pin_*.deb | grep -q './usr/bin/zed-acp-pin-update'
+          dpkg-deb --fsys-tarfile packages/zed-acp-pin_*.deb \
+            | tar -xO ./usr/bin/zed-acp-pin-update | grep -q '^IMAGE=".*@sha256:[0-9a-f]\{64\}"$'
+          dpkg-deb --fsys-tarfile packages/zed-acp-sandbox_*.deb \
+            | tar -xO ./usr/bin/zed-acp-sandbox | grep -q '^IMAGE_ID="[0-9a-f]\{12\}"$'
 
       - name: Update APT repository
         if: steps.version.outputs.skip != 'true'

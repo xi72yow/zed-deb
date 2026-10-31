@@ -1,0 +1,53 @@
+# sandbox image for zed-acp-sandbox, the node stage is also the image pin of zed-acp-pin-update
+FROM docker.io/library/node:22-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS node
+
+FROM docker.io/library/debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+
+# no toolchains, projects build and test through their own Containerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates \
+  curl \
+  git \
+  git-lfs \
+  jq \
+  ripgrep \
+  fd-find \
+  openssh-client \
+  sudo \
+  iptables \
+  ipset \
+  iproute2 \
+  dnsmasq-base \
+  aggregate \
+  util-linux \
+  podman \
+  uidmap \
+  passt \
+  fuse-overlayfs \
+  libcap2-bin \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+
+# keep-id maps the host uid onto agent, the inner podman gets every other id of the outer namespace
+ARG UID=1000
+RUN useradd -m -u "$UID" -s /bin/bash agent && \
+    echo "agent:1:$((UID - 1))" > /etc/subuid && \
+    echo "agent:$((UID + 1)):$((65535 - UID))" >> /etc/subuid && \
+    cp /etc/subuid /etc/subgid
+
+# sudo is only needed until the firewall is up. A setuid newuidmap runs as root, which is not
+# the owner of the new namespace and would need CAP_SYS_ADMIN, file capabilities keep the owner
+RUN find / -xdev -type f -perm /6000 ! -path /usr/bin/sudo -exec chmod a-s {} + && \
+    setcap cap_setuid,cap_setfcap+ep /usr/bin/newuidmap && \
+    setcap cap_setgid+ep /usr/bin/newgidmap
+
+COPY containers.conf /etc/containers/containers.conf
+COPY CLAUDE.md /etc/claude-code/CLAUDE.md
+COPY git /usr/local/bin/git
+COPY entrypoint.sh init-firewall.sh cleanup-firewall.sh /usr/local/bin/
+RUN chmod 755 /usr/local/bin/git /usr/local/bin/entrypoint.sh /usr/local/bin/init-firewall.sh /usr/local/bin/cleanup-firewall.sh && \
+    echo "agent ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh, /usr/local/bin/cleanup-firewall.sh" > /etc/sudoers.d/agent-firewall && \
+    chmod 0440 /etc/sudoers.d/agent-firewall
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

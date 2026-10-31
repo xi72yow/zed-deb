@@ -30,12 +30,13 @@ sudo apt remove zed
 sudo rm /etc/apt/sources.list.d/zed.list /usr/share/keyrings/zed-deb.gpg
 ```
 
-## zed-acp-pin
+## zed-acp-pin and zed-acp-sandbox
 
-Optional package that pins the Claude ACP agent for Zed and updates it weekly, only to releases older than seven days. It ships no agent code, see [acp-deb/README.md](acp-deb/README.md).
+Optional packages around the Claude ACP agent for Zed. `zed-acp-pin` pins the agent and updates it daily, only to releases older than seven days, including their dependency tree. `zed-acp-sandbox` runs the same pinned agent in a rootless podman container with a DNS-based firewall, as profiles `work` and `yolo`. Neither ships agent code, see [acp-deb/README.md](acp-deb/README.md).
 
 ```bash
 sudo apt install zed-acp-pin
+sudo apt install zed-acp-sandbox
 ```
 
 ## Setup (for repository maintainers)
