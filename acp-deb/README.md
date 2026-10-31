@@ -98,7 +98,7 @@ zed-acp-sandbox login     # creates a long-lived token with the pinned claude, c
 
 - **Project:** Zed starts the agent in the first folder of the window, which is mounted under its host path. Further folders of the same window are not mounted, so the sandbox expects one folder per window.
 - **Network:** In `strict` mode a dnsmasq inside the container resolves only allowlisted domains and adds their addresses to the firewall on the fly. This keeps CDNs with rotating addresses working and refuses DNS for every other name. Only dnsmasq may send DNS to the outside.
-- **Podman inside:** Projects build and test through their own `Containerfile`. Inner containers share the network of the sandbox, so the firewall applies to them as well.
+- **Podman inside:** Projects build and test through their own `Containerfile`. Inner containers share the network of the sandbox, so the firewall applies to them as well. Each project has its own image store (volume `zed-acp-sandbox-<hash of the path>`), so concurrent sandboxes do not share runtime state and one project cannot plant images for another. Base images are therefore pulled once per project.
 - **Git:** `.git` is writable, so yolo can commit. `.git/hooks` and `.git/config`, including those of submodules, are mounted read-only, since they would run on the host with the next git call there. A git wrapper rejects `push`, `prune`, `reflog expire` and `gc --prune=now`. This is a hurdle against mistakes, not a boundary.
 - **Claude config:** Each profile has its own config dir in `~/.local/share/zed-acp-sandbox/<profile>/`. `CLAUDE.md`, skills, agents, commands and output styles of `~/.claude` are mounted read-only, `settings.json` is copied without hooks and status line. A writable `~/.claude` would let a session place hooks that `zed-acp-pin` then runs on the host.
 - **Login:** The sandbox uses a token from `claude setup-token` via `CLAUDE_CODE_OAUTH_TOKEN`, read from the keyring over D-Bus (Secret Service). Sharing `~/.claude/.credentials.json` would let a refresh in the sandbox rotate the token under host sessions, because Claude locks the refresh per config dir.
@@ -132,7 +132,7 @@ Zed shows the stderr of the launcher under `dev: open acp logs`.
 - The agent itself comes from `zed-acp-pin` and is mounted read-only, it needs no rebuild.
 - The local image is rebuilt on the next start when its sources change, for example after Dependabot moved the digest of the Debian or node base.
 - `zed-acp-sandbox-maintain.timer` runs `zed-acp-sandbox maintain` every Monday at 10:00: a rebuild without cache, so Debian security updates arrive in between, then `prune`.
-- `zed-acp-sandbox prune` removes unused images of the sandbox on the host, found by the label `zed-acp-sandbox`, and everything unused in the image storage of the podman inside. Images of other projects stay untouched.
+- `zed-acp-sandbox prune` removes unused images of the sandbox on the host, found by the label `zed-acp-sandbox`, and everything unused in the image store of each project. A store whose sandbox is running is skipped, since a separate podman would not see its inner containers as running. The store of a project directory that no longer exists is removed. Images and volumes of other projects stay untouched.
 - A running sandbox keeps its image, it is removed by the next prune.
 
 ### Limits

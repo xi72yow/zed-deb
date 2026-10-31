@@ -12,21 +12,30 @@ PIN_DIR="${ZED_ACP_PIN_DIR:-$HOME/.local/share/zed-acp-pin}"
 AGENT="$PIN_DIR/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}/zed-acp-sandbox"
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/zed-acp-sandbox/settings.json"
-STORAGE_VOLUME="zed-acp-sandbox-storage"
 SANDBOX_HOME=/home/agent
+INNER_STORAGE="$SANDBOX_HOME/.local/share/containers"
 PROJECT="$PWD"
 MOUNTS=()
 
-# what the podman inside needs: the default capabilities of podman, an unmasked /proc to mount
-# its own, and the volume with its images
+# what the podman inside needs: the default capabilities of podman and an unmasked /proc to
+# mount its own
 NESTED_PODMAN=(
   --userns=keep-id
   --cap-drop=ALL
   --cap-add=CHOWN,DAC_OVERRIDE,FOWNER,FSETID,KILL,SETGID,SETUID,SETPCAP,SYS_CHROOT,SETFCAP
   --security-opt unmask=/proc/*
   --device /dev/fuse
-  -v "$STORAGE_VOLUME:$SANDBOX_HOME/.local/share/containers"
 )
+
+# one image store per project: concurrent sandboxes would share it with separate runtime state,
+# and one project could plant images under names another one uses
+project_volume() {
+  local volume
+  volume="zed-acp-sandbox-$(printf '%s' "$PROJECT" | sha256sum | cut -c1-12)"
+  podman volume exists "$volume" || podman volume create \
+    --label zed-acp-sandbox=true --label zed-acp-sandbox.project="$PROJECT" "$volume" >/dev/null
+  echo "$volume"
+}
 
 log() { echo "zed-acp-sandbox: $*" >&2; }
 die() { log "$*"; exit 1; }
@@ -199,6 +208,7 @@ run_sandbox() {
 
   prepare_claude_home "$profile"
   mount_git_protection
+  MOUNTS+=(-v "$(project_volume):$INNER_STORAGE")
 
   # the network capabilities are only for the firewall setup, the entrypoint drops them
   exec podman run --rm -i \
@@ -217,12 +227,28 @@ run_sandbox() {
     "$IMAGE" "$network" "$domains" "$@"
 }
 
-# only images and volumes of the sandbox, the label keeps the images of other projects out
+# only images and volumes of the sandbox, the label keeps those of other projects out
 prune() {
+  local volume project
   remove_old_tags
   podman image prune -f --filter label=zed-acp-sandbox </dev/null >&2
   podman image exists "$IMAGE" || return 0
-  podman run --rm "${NESTED_PODMAN[@]}" --entrypoint podman "$IMAGE" system prune -af --volumes </dev/null >&2
+
+  # a separate podman does not see the inner containers of a running sandbox as running,
+  # so a store in use waits for the next run
+  while read -r volume project; do
+    if [ -n "$(podman ps -q --filter volume="$volume")" ]; then
+      log "skipping $volume, the sandbox of $project is running"
+    elif [ ! -d "$project" ]; then
+      log "removing $volume, $project no longer exists"
+      podman volume rm "$volume" >&2
+    else
+      log "pruning $volume of $project"
+      podman run --rm "${NESTED_PODMAN[@]}" -v "$volume:$INNER_STORAGE" --entrypoint podman \
+        "$IMAGE" system prune -af --volumes </dev/null >&2
+    fi
+  done < <(podman volume ls --filter label=zed-acp-sandbox \
+    --format '{{.Name}} {{index .Labels "zed-acp-sandbox.project"}}')
 }
 
 case "${1:-}" in
