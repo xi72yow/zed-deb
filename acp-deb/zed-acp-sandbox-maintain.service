@@ -1,0 +1,6 @@
+[Unit]
+Description=Rebuild the zed-acp-sandbox image with current Debian packages and prune it
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/zed-acp-sandbox maintain

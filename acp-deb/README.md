@@ -127,11 +127,18 @@ zed-acp-sandbox shell work cat /run/dnsmasq/dnsmasq.log   # dns queries, refused
 
 Zed shows the stderr of the launcher under `dev: open acp logs`.
 
+### Updates and cleanup
+
+- The agent itself comes from `zed-acp-pin` and is mounted read-only, it needs no rebuild.
+- The local image is rebuilt on the next start when its sources change, for example after Dependabot moved the digest of the Debian or node base.
+- `zed-acp-sandbox-maintain.timer` runs `zed-acp-sandbox maintain` every Monday at 10:00: a rebuild without cache, so Debian security updates arrive in between, then `prune`.
+- `zed-acp-sandbox prune` removes unused images of the sandbox on the host, found by the label `zed-acp-sandbox`, and everything unused in the image storage of the podman inside. Images of other projects stay untouched.
+- A running sandbox keeps its image, it is removed by the next prune.
+
 ### Limits
 
 - Changes in the working tree can still reach the host later, for example through build scripts, `.claude/settings.json` hooks of the project or Zed tasks. They should be reviewed before building on the host or opening the project with `zed-acp-pin`.
 - `/proc` of the sandbox is unmasked, which nested podman needs to mount its own `/proc`. Writes there stay denied by the host kernel.
-- The local image is rebuilt automatically when its sources change, from the layer cache. Debian security updates in between need `zed-acp-sandbox build`, which builds without cache.
 
 ## Permission title check
 

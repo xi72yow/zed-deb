@@ -3,6 +3,9 @@ FROM docker.io/library/node:22-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f15
 
 FROM docker.io/library/debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
 
+# set first, so intermediate images carry it too and zed-acp-sandbox prune finds them
+LABEL zed-acp-sandbox=true
+
 # no toolchains, projects build and test through their own Containerfile
 RUN apt-get update && apt-get install -y --no-install-recommends \
   ca-certificates \

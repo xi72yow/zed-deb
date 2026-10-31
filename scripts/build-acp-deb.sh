@@ -67,33 +67,40 @@ build_pin() {
 " Installs the Claude ACP agent from npm per user and updates it daily,
  only to releases older than seven days. Ships no agent code itself."
 
-  cat > "${pkg_dir}/DEBIAN/postinst" << 'POSTEOF'
+  write_timer_scripts "${pkg_dir}" zed-acp-pin-update.timer
+  finish_package "${pkg_dir}" zed-acp-pin
+}
+
+# Usage: write_timer_scripts <package dir> <user timer>
+write_timer_scripts() {
+  local pkg_dir="$1" timer="$2"
+  cat > "${pkg_dir}/DEBIAN/postinst" << POSTEOF
 #!/bin/bash
 set -e
-if [ "$1" = "configure" ]; then
-  systemctl --global enable zed-acp-pin-update.timer 2>/dev/null || true
+if [ "\$1" = "configure" ]; then
+  systemctl --global enable ${timer} 2>/dev/null || true
 fi
 POSTEOF
-  cat > "${pkg_dir}/DEBIAN/prerm" << 'POSTEOF'
+  cat > "${pkg_dir}/DEBIAN/prerm" << POSTEOF
 #!/bin/bash
 set -e
-if [ "$1" = "remove" ]; then
-  systemctl --global disable zed-acp-pin-update.timer 2>/dev/null || true
+if [ "\$1" = "remove" ]; then
+  systemctl --global disable ${timer} 2>/dev/null || true
 fi
 POSTEOF
   chmod 755 "${pkg_dir}/DEBIAN/postinst" "${pkg_dir}/DEBIAN/prerm"
-
-  finish_package "${pkg_dir}" zed-acp-pin
 }
 
 build_sandbox() {
   local pkg_dir="${WORKDIR}/zed-acp-sandbox_${VERSION}_all"
-  mkdir -p "${pkg_dir}/DEBIAN" "${pkg_dir}/usr/share/zed-acp-sandbox/image" "${pkg_dir}/usr/share/doc/zed-acp-sandbox"
+  mkdir -p "${pkg_dir}/DEBIAN" "${pkg_dir}/usr/share/zed-acp-sandbox/image" \
+    "${pkg_dir}/usr/lib/systemd/user" "${pkg_dir}/usr/share/doc/zed-acp-sandbox"
 
   install -D -m 755 "${SOURCE_DIR}/zed-acp-sandbox" "${pkg_dir}/usr/bin/zed-acp-sandbox"
   sed -i "s|@IMAGE_ID@|${IMAGE_ID}|" "${pkg_dir}/usr/bin/zed-acp-sandbox"
   install -m 644 "${SANDBOX_DIR}"/* "${pkg_dir}/usr/share/zed-acp-sandbox/image/"
   install -m 644 "${SOURCE_DIR}"/{claude-token,keyring,dbus}.mjs "${pkg_dir}/usr/share/zed-acp-sandbox/"
+  install -m 644 "${SOURCE_DIR}"/zed-acp-sandbox-maintain.{service,timer} "${pkg_dir}/usr/lib/systemd/user/"
   install -m 644 "${SOURCE_DIR}/README.md" "${pkg_dir}/usr/share/doc/zed-acp-sandbox/README.md"
 
   write_control "${pkg_dir}" zed-acp-sandbox \
@@ -102,6 +109,7 @@ build_sandbox() {
 " Starts the pinned Claude ACP agent in a rootless podman container with a
  firewall, protected git hooks and podman inside, as profiles work and yolo."
 
+  write_timer_scripts "${pkg_dir}" zed-acp-sandbox-maintain.timer
   finish_package "${pkg_dir}" zed-acp-sandbox
 }
 
