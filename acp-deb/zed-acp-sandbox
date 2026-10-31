@@ -87,9 +87,14 @@ login() {
 build_image() {
   log "building $IMAGE"
   podman build "$@" --build-arg UID="$(id -u)" -t "$IMAGE" "$SHARE/image" </dev/null >&2
+  remove_old_tags
+}
+
+# an image still used by a running sandbox stays, the next prune catches it
+remove_old_tags() {
   podman images --format '{{.Repository}}:{{.Tag}}' \
     | grep "^localhost/zed-acp-sandbox:.*-uid$(id -u)$" | grep -vx "$IMAGE" \
-    | xargs -r podman rmi >&2 || true
+    | xargs -r podman rmi 2>/dev/null >&2 || true
 }
 
 check_project() {
@@ -214,6 +219,7 @@ run_sandbox() {
 
 # only images and volumes of the sandbox, the label keeps the images of other projects out
 prune() {
+  remove_old_tags
   podman image prune -f --filter label=zed-acp-sandbox </dev/null >&2
   podman image exists "$IMAGE" || return 0
   podman run --rm "${NESTED_PODMAN[@]}" --entrypoint podman "$IMAGE" system prune -af --volumes </dev/null >&2
