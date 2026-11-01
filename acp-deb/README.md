@@ -100,6 +100,7 @@ zed-acp-sandbox login     # creates a long-lived token with the pinned claude, c
 - **Network:** In `strict` mode a dnsmasq inside the container resolves only allowlisted domains and adds their addresses to the firewall on the fly. This keeps CDNs with rotating addresses working and refuses DNS for every other name. Only dnsmasq may send DNS to the outside.
 - **Podman inside:** Projects build and test through their own `Containerfile`. Inner containers share the network of the sandbox, so the firewall applies to them as well. Each project has its own image store (volume `zed-acp-sandbox-<hash of the path>`), so concurrent sandboxes do not share runtime state and one project cannot plant images for another. Base images are therefore pulled once per project.
 - **Git:** `.git` is writable, so yolo can commit. `.git/hooks` and `.git/config`, including those of submodules, are mounted read-only, since they would run on the host with the next git call there. A git wrapper rejects `push`, `prune`, `reflog expire` and `gc --prune=now`. This is a hurdle against mistakes, not a boundary.
+- **Agent config of the project:** In `yolo`, `.claude` and an existing `.mcp.json` of the project are mounted read-only, since `zed-acp-pin` loads them on the host. A missing `.claude` is created empty. A new `.mcp.json` can still be written, project MCP servers ask for approval before they start.
 - **Claude config:** Each profile has its own config dir in `~/.local/share/zed-acp-sandbox/<profile>/`. `CLAUDE.md`, skills, agents, commands and output styles of `~/.claude` are mounted read-only, `settings.json` is copied without hooks and status line. A writable `~/.claude` would let a session place hooks that `zed-acp-pin` then runs on the host.
 - **Login:** The sandbox uses a token from `claude setup-token` via `CLAUDE_CODE_OAUTH_TOKEN`, read from the keyring over D-Bus (Secret Service). Sharing `~/.claude/.credentials.json` would let a refresh in the sandbox rotate the token under host sessions, because Claude locks the refresh per config dir.
 
@@ -117,6 +118,26 @@ Network settings are read from `~/.config/zed-acp-sandbox/settings.json`, never 
 ```
 
 `kvm` passes `/dev/kvm` into the sandbox, for projects that start VMs.
+
+### Permission window
+
+Permission prompts of Zed show little in its notification. With `"env": { "ZED_ACP_PERMISSION_POPUP": "1" }` on `zed-acp-pin` or `zed-work`, a proxy on the host also opens a window with the full command or diff, above all other windows and on every workspace. The first answer counts: a click in the window closes the dialog in Zed, an answer in Zed closes the window, and closing the window leaves the request open in Zed. `yolo` has no prompts and ignores the setting.
+
+The window needs `gjs` and `gir1.2-gtk-3.0`, without them the request stays with Zed. It runs on XWayland, since Wayland clients cannot stay above other windows. It takes no focus, so a key press meant for another window does not reach it, and its buttons only react to the mouse. `AskUserQuestion` stays in Zed.
+
+### Handoff
+
+One project uses three sessions, in one Zed window:
+
+| Role | Agent server | Result |
+|---|---|---|
+| Planner | `zed-admin` | plan, `TASK.md` on a new branch |
+| Worker | `zed-yolo` | commits, `REPORT.md` |
+| Verify | `zed-work` | `VERIFY.md`, no code changes |
+
+The skill `/yolo-handoff` runs in the planner and prints the first prompt for the other two. `zed-acp-sandbox install-skills` links it to `~/.claude/skills`, once after installing the package.
+
+Worker and verify run one after the other. Both use the same working tree and the same inner image store, which does not support podman running in two sandboxes at once. Their sessions may stay open in between. The planner runs on the host and reads what the sandbox produced, so the skill treats `REPORT.md`, `VERIFY.md` and the diff as data and checks agent config before a merge.
 
 ### Debugging
 
@@ -137,7 +158,7 @@ Zed shows the stderr of the launcher under `dev: open acp logs`.
 
 ### Limits
 
-- Changes in the working tree can still reach the host later, for example through build scripts, `.claude/settings.json` hooks of the project or Zed tasks. They should be reviewed before building on the host or opening the project with `zed-acp-pin`.
+- Changes in the working tree can still reach the host later, for example through build scripts, the language servers of Zed or Zed tasks. They should be reviewed before building on the host. Commits can also carry `.claude` past the read-only mount, so a diff of that path belongs before every merge.
 - `/proc` of the sandbox is unmasked, which nested podman needs to mount its own `/proc`. Writes there stay denied by the host kernel.
 
 ## Permission title check

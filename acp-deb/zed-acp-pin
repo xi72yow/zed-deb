@@ -18,4 +18,8 @@ for candidate in /usr/lib/nodejs-24/bin/node /usr/lib/nodejs-22/bin/node; do
 done
 
 # the bundled binary has its own updater, which would bypass the pin
-DISABLE_AUTOUPDATER=1 exec "${NODE:-node}" "$AGENT" "$@"
+export DISABLE_AUTOUPDATER=1
+if [ "${ZED_ACP_PERMISSION_POPUP:-}" = 1 ]; then
+  exec "${NODE:-node}" /usr/share/zed-acp-pin/permission-proxy.mjs "${NODE:-node}" "$AGENT" "$@"
+fi
+exec "${NODE:-node}" "$AGENT" "$@"

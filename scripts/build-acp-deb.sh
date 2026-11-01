@@ -24,9 +24,9 @@ IMAGE_ID=$(cd "${SANDBOX_DIR}" && find . -type f -print0 | sort -z | xargs -0 sh
 WORKDIR=$(mktemp -d)
 trap "rm -rf ${WORKDIR}" EXIT
 
-# Usage: write_control <package dir> <name> <depends> <summary> <long description>
+# Usage: write_control <package dir> <name> <depends> <summary> <long description> [recommends]
 write_control() {
-  local pkg_dir="$1" name="$2" depends="$3" summary="$4" long="$5"
+  local pkg_dir="$1" name="$2" depends="$3" summary="$4" long="$5" recommends="${6:-zed}"
   cat > "${pkg_dir}/DEBIAN/control" << CTLEOF
 Package: ${name}
 Version: ${VERSION}
@@ -34,7 +34,7 @@ Architecture: all
 Maintainer: zed-deb repository <noreply@github.com>
 Installed-Size: $(du -sk "${pkg_dir}" | cut -f1)
 Depends: ${depends}
-Recommends: zed
+Recommends: ${recommends}
 Section: editors
 Priority: optional
 Homepage: https://github.com/xi72yow/zed-deb
@@ -58,6 +58,7 @@ build_pin() {
   install -D -m 755 "${SOURCE_DIR}/zed-acp-pin" "${pkg_dir}/usr/bin/zed-acp-pin"
   install -D -m 755 "${SOURCE_DIR}/zed-acp-pin-update" "${pkg_dir}/usr/bin/zed-acp-pin-update"
   sed -i "s|@NODE_IMAGE@|${NODE_IMAGE}|" "${pkg_dir}/usr/bin/zed-acp-pin-update"
+  install -D -m 644 -t "${pkg_dir}/usr/share/zed-acp-pin" "${SOURCE_DIR}"/permission-{proxy.mjs,popup.js}
   install -m 644 "${SOURCE_DIR}"/zed-acp-pin-update.{service,timer} "${pkg_dir}/usr/lib/systemd/user/"
   install -m 644 "${SOURCE_DIR}/README.md" "${pkg_dir}/usr/share/doc/zed-acp-pin/README.md"
 
@@ -65,7 +66,8 @@ build_pin() {
     "podman, libglib2.0-bin, nodejs-24 | nodejs-22 | nodejs (>= 22)" \
     "Pinned, delayed updates for the Claude ACP agent in Zed" \
 " Installs the Claude ACP agent from npm per user and updates it daily,
- only to releases older than seven days. Ships no agent code itself."
+ only to releases older than seven days. Ships no agent code itself." \
+    "zed, gjs, gir1.2-gtk-3.0"
 
   write_timer_scripts "${pkg_dir}" zed-acp-pin-update.timer
   finish_package "${pkg_dir}" zed-acp-pin
@@ -100,6 +102,7 @@ build_sandbox() {
   sed -i "s|@IMAGE_ID@|${IMAGE_ID}|" "${pkg_dir}/usr/bin/zed-acp-sandbox"
   install -m 644 "${SANDBOX_DIR}"/* "${pkg_dir}/usr/share/zed-acp-sandbox/image/"
   install -m 644 "${SOURCE_DIR}"/{claude-token,keyring,dbus}.mjs "${pkg_dir}/usr/share/zed-acp-sandbox/"
+  install -D -m 644 "${SOURCE_DIR}/skills/yolo-handoff/SKILL.md" "${pkg_dir}/usr/share/zed-acp-sandbox/skills/yolo-handoff/SKILL.md"
   install -m 644 "${SOURCE_DIR}"/zed-acp-sandbox-maintain.{service,timer} "${pkg_dir}/usr/lib/systemd/user/"
   install -m 644 "${SOURCE_DIR}/README.md" "${pkg_dir}/usr/share/doc/zed-acp-sandbox/README.md"
 

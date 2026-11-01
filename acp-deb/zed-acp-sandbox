@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Starts the pinned Claude ACP agent in a podman sandbox, configured as custom agent server in Zed
-# Usage: zed-acp-sandbox <work|yolo> | shell <work|yolo> [command...] | login [--paste] | build | prune | maintain
+# Usage: zed-acp-sandbox <work|yolo> | shell <work|yolo> [command...] | login [--paste] | build | prune | maintain | install-skills
 # stdout belongs to the ACP protocol, own output goes to stderr
 
 IMAGE_ID="@IMAGE_ID@"
@@ -16,6 +16,7 @@ SANDBOX_HOME=/home/agent
 INNER_STORAGE="$SANDBOX_HOME/.local/share/containers"
 PROJECT="$PWD"
 MOUNTS=()
+PERMISSION_PROXY=()
 
 # what the podman inside needs: the default capabilities of podman and an unmasked /proc to
 # mount its own
@@ -43,13 +44,13 @@ die() { log "$*"; exit 1; }
 host_node() {
   local candidate
   for candidate in /usr/lib/nodejs-24/bin/node /usr/lib/nodejs-22/bin/node; do
-    [ -x "$candidate" ] && { "$candidate" "$@"; return; }
+    [ -x "$candidate" ] && { echo "$candidate"; return; }
   done
-  node "$@"
+  echo node
 }
 
 claude_token() {
-  host_node "$SHARE/claude-token.mjs" "$@"
+  "$(host_node)" "$SHARE/claude-token.mjs" "$@"
 }
 
 # a long-lived token instead of the refreshing credentials of ~/.claude: a refresh inside the
@@ -91,6 +92,18 @@ login() {
   fi
   printf '%s' "$token" | claude_token set
   log "token stored in the keyring"
+}
+
+# a symlink into the package follows its updates, and the sandbox mounts what the link points to
+install_skills() {
+  local skills="$HOME/.claude/skills" source target
+  mkdir -p "$skills"
+  for source in "$SHARE"/skills/*; do
+    target="$skills/${source##*/}"
+    [ ! -e "$target" ] || [ -L "$target" ] || die "$target exists and is no symlink, not replacing it"
+    ln -sfn "$source" "$target"
+    log "linked $target"
+  done
 }
 
 build_image() {
@@ -141,6 +154,15 @@ mount_git_protection() {
     echo "$PROJECT/.git"
     [ -d "$PROJECT/.git/modules" ] && find "$PROJECT/.git/modules" -type d -name objects -printf '%h\n'
   )
+}
+
+# agent settings of the project would run on the host once zed-admin opens it, like git hooks
+protect_agent_config() {
+  mkdir -p "$PROJECT/.claude"
+  MOUNTS+=(-v "$PROJECT/.claude:$PROJECT/.claude:ro")
+  if [ -f "$PROJECT/.mcp.json" ]; then
+    MOUNTS+=(-v "$PROJECT/.mcp.json:$PROJECT/.mcp.json:ro")
+  fi
 }
 
 # own claude home per profile, a writable ~/.claude would let hooks reach zed-admin on the host
@@ -208,10 +230,11 @@ run_sandbox() {
 
   prepare_claude_home "$profile"
   mount_git_protection
+  if [ "$profile" = yolo ]; then protect_agent_config; fi
   MOUNTS+=(-v "$(project_volume):$INNER_STORAGE")
 
   # the network capabilities are only for the firewall setup, the entrypoint drops them
-  exec podman run --rm -i \
+  exec "${PERMISSION_PROXY[@]}" podman run --rm -i \
     "${NESTED_PODMAN[@]}" \
     --cap-add=NET_ADMIN,NET_RAW,NET_BIND_SERVICE \
     --device /dev/net/tun \
@@ -254,6 +277,10 @@ prune() {
 case "${1:-}" in
   work|yolo)
     [ -f "$AGENT" ] || die "no pinned agent found, run: zed-acp-pin-update latest"
+    # the proxy stays on the host, the window has no place inside the sandbox
+    if [ "$1" = work ] && [ "${ZED_ACP_PERMISSION_POPUP:-}" = 1 ]; then
+      PERMISSION_PROXY=("$(host_node)" /usr/share/zed-acp-pin/permission-proxy.mjs)
+    fi
     run_sandbox "$1" node "$AGENT" "${@:2}"
     ;;
   shell)
@@ -261,10 +288,11 @@ case "${1:-}" in
     if [ $# -gt 2 ]; then run_sandbox "$2" "${@:3}"; else run_sandbox "$2" bash; fi
     ;;
   login) login "${2:-}" ;;
+  install-skills) install_skills ;;
   # explicit builds skip the cache, so debian security updates reach the image
   build) build_image --no-cache ;;
   prune) prune ;;
   # what the weekly timer runs, a running sandbox keeps its image until the next prune
   maintain) build_image --no-cache && prune ;;
-  *) die "usage: zed-acp-sandbox <work|yolo> | shell <work|yolo> [command...] | login [--paste] | build | prune | maintain" ;;
+  *) die "usage: zed-acp-sandbox <work|yolo> | shell <work|yolo> [command...] | login [--paste] | build | prune | maintain | install-skills" ;;
 esac
