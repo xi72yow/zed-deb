@@ -13,10 +13,28 @@ const POPUP = process.env.ZED_ACP_POPUP_COMMAND?.split(" ") ?? ["gjs", "-m", joi
 const agent = spawn(command, args, { stdio: ["pipe", "pipe", "inherit"] });
 
 const requests = new Map();
+const thoughts = new Map();
 const key = (id) => JSON.stringify(id);
 const toZed = (line) => process.stdout.write(`${line}\n`);
 const toAgent = (line) => agent.stdin.write(`${line}\n`);
 const rpc = (message) => JSON.stringify({ jsonrpc: "2.0", ...message });
+
+// keeps the latest thinking block per session, a tool call in between does not end it
+function trackThought({ sessionId, update }) {
+  if (update?.sessionUpdate !== "agent_thought_chunk") {
+    if (thoughts.has(sessionId)) thoughts.get(sessionId).closed = true;
+    return;
+  }
+  const thought = thoughts.get(sessionId);
+  const text = update.content?.text ?? "";
+  if (!thought || thought.closed) thoughts.set(sessionId, { text, closed: false });
+  else thought.text += text;
+}
+
+function withThought(detail, sessionId) {
+  const thought = thoughts.get(sessionId)?.text;
+  return thought ? `${detail}\n\n--- Thinking ---\n\n${thought}` : detail;
+}
 
 function renderContent(item) {
   if (item.type === "diff") {
@@ -30,6 +48,13 @@ function describe({ toolCall }) {
   const rendered = (toolCall?.content ?? []).map(renderContent).filter(Boolean);
   if (rendered.length) return rendered.join("\n\n");
   return input.command ?? JSON.stringify(input, null, 2);
+}
+
+// the title of a bash call is the whole command, which the detail shows already
+function heading({ toolCall }) {
+  const input = toolCall?.rawInput ?? {};
+  if (input.command) return input.description ?? "Befehl ausführen";
+  return toolCall?.title ?? "Berechtigung";
 }
 
 function openPopup(entry, params) {
@@ -49,8 +74,8 @@ function openPopup(entry, params) {
   popup.stdin.end(
     JSON.stringify({
       project: basename(process.cwd()),
-      title: params.toolCall?.title ?? "Berechtigung",
-      detail: describe(params),
+      title: heading(params),
+      detail: withThought(describe(params), params.sessionId),
       options: params.options,
     }),
   );
@@ -79,6 +104,7 @@ function parse(line) {
 
 createInterface({ input: agent.stdout }).on("line", (line) => {
   const message = parse(line);
+  if (message?.method === "session/update") trackThought(message.params);
   if (message?.method === "$/cancel_request") {
     const entry = requests.get(key(message.params?.requestId));
     if (entry) settle(entry);

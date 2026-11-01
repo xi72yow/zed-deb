@@ -7,6 +7,7 @@ import Gio from "gi://Gio";
 import GioUnix from "gi://GioUnix";
 import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=3.0";
+import Pango from "gi://Pango";
 import System from "system";
 
 // node passes stdin as a socket, which /dev/stdin cannot open
@@ -25,15 +26,20 @@ function buildWindow(app) {
     title: `${request.project}: Berechtigung`,
     default_width: 860,
     default_height: 560,
-    type_hint: Gdk.WindowTypeHint.DIALOG,
     focus_on_map: false,
   });
   window.set_keep_above(true);
   window.stick();
   window.set_titlebar(new Gtk.HeaderBar({ show_close_button: true, title: window.title }));
 
-  const title = new Gtk.Label({ use_markup: true, wrap: true, xalign: 0, selectable: true });
-  title.set_markup(`<big><b>${GLib.markup_escape_text(request.title, -1)}</b></big>`);
+  const title = new Gtk.Label({
+    use_markup: true,
+    wrap: true,
+    xalign: 0,
+    lines: 3,
+    ellipsize: Pango.EllipsizeMode.END,
+  });
+  title.set_markup(`<big><b>${GLib.markup_escape_text(request.title.split("\n")[0], -1)}</b></big>`);
 
   const detail = new Gtk.TextView({
     editable: false,
