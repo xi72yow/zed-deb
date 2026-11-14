@@ -1,7 +1,7 @@
 # sandbox image for zed-acp-sandbox, the node stage is also the image pin of zed-acp-pin-update
 FROM docker.io/library/node:25-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS node
 
-FROM docker.io/library/debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+FROM docker.io/library/debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
 # set first, so intermediate images carry it too and zed-acp-sandbox prune finds them
 LABEL zed-acp-sandbox=true
